@@ -26,7 +26,7 @@ export function DiscordSummary() {
     const fetchSummary = async () => {
       try {
         const response = await fetch(
-          "https://discord-summarizer-api.fly.dev/summarize/863154240319258674",
+          "http://localhost:8000/summarize/863154240319258674",
         );
         if (!response.ok) {
           throw new Error("Failed to fetch summary");
