@@ -1,0 +1,59 @@
+FROM oven/bun:1 as builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json bun.lockb ./
+
+# Install dependencies
+RUN bun install
+
+# Copy all other files
+COPY . .
+
+# Build using Bun's native builder
+RUN bun build ./src/main.tsx \
+    --target browser \
+    --outdir ./dist \
+    --minify \
+    --splitting \
+    --entry-naming "[dir]/[name].[ext]"
+
+# Create production index.html with dynamically found bundle references
+RUN CSS_FILE=$(ls dist/index-*.css) && \
+    CSS_NAME=$(basename $CSS_FILE) && \
+    JS_FILE=$(ls dist/main*.js) && \
+    JS_NAME=$(basename $JS_FILE) && \
+    echo '<!doctype html>' > dist/index.html && \
+    echo '<html lang="en">' >> dist/index.html && \
+    echo '  <head>' >> dist/index.html && \
+    echo '    <meta charset="UTF-8" />' >> dist/index.html && \
+    echo '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />' >> dist/index.html && \
+    echo '    <title>Discord Summarizer</title>' >> dist/index.html && \
+    echo "    <link rel=\"stylesheet\" href=\"$CSS_NAME\">" >> dist/index.html && \
+    echo '  </head>' >> dist/index.html && \
+    echo '  <body>' >> dist/index.html && \
+    echo '    <div id="root"></div>' >> dist/index.html && \
+    echo "    <script type=\"module\" src=\"$JS_NAME\"></script>" >> dist/index.html && \
+    echo '  </body>' >> dist/index.html && \
+    echo '</html>' >> dist/index.html
+
+# List contents of dist directory to verify output
+RUN ls -la dist/
+
+# Production nginx stage
+FROM nginx:alpine
+
+# Copy the built assets from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Verify the files were copied
+RUN ls -la /usr/share/nginx/html/
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose port 80
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

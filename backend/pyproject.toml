@@ -1,0 +1,16 @@
+[project]
+name = "discord_summarizer"
+version = "0.1.0"
+description = "A Discord summarization and reporting tool using FastAPI and OpenAI"
+license = { file = "LICENSE" }
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "requests",
+    "python-dotenv",
+    "aiohttp>=3.11.11",
+]
+requires-python = ">=3.9"
+
+[project.scripts]
+start = "uvicorn src.discord_summarizer.main:app --reload"
