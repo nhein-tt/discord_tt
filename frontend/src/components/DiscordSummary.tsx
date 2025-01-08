@@ -26,7 +26,7 @@ export function DiscordSummary() {
     const fetchSummary = async () => {
       try {
         const response = await fetch(
-          "http://localhost:8000/summarize/863154240319258674",
+	      `${import.meta.env.VITE_API_URL}/summarize/863154240319258674`,
         );
         if (!response.ok) {
           throw new Error("Failed to fetch summary");

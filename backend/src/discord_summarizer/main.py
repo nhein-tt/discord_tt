@@ -7,12 +7,12 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from .database import DiscordDB
-app = FastAPI()
+app = FastAPI(root_path="/api")
 db = DiscordDB()
 
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:3000"
+    "http://localhost:5173,http://localhost:3000,http://localhost"
 ).split(",")
 
 app.add_middleware(
