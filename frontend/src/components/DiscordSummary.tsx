@@ -19,7 +19,7 @@ import Markdown from "react-markdown";
 // Configuration constants
 const ADMIN_PASSWORD = "nhein-tt";
 const SERVER_ID = "863154240319258674";
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // Tenstorrent brand colors
 const THEME = {
