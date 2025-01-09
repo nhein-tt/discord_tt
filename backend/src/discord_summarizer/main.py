@@ -51,6 +51,29 @@ async def sync_single_channel(channel_id: str, channel_name: str, server_id: str
 async def root():
     return {"message": "Hello, World!"}
 
+@app.post("/clear-cache/{server_id}")
+async def clear_summaries_cache(server_id: str):
+    """
+    Clears cached summaries for all channels in a server.
+    """
+    try:
+        with db.get_db() as conn:
+            # Delete all cached summaries for channels in this server
+            conn.execute("""
+                DELETE FROM channel_summaries
+                WHERE channel_id IN (
+                    SELECT channel_id FROM channels
+                    WHERE server_id = ?
+                )
+            """, (server_id,))
+
+        return {
+            "status": "success",
+            "message": "Cache cleared successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/summarize/{server_id}")
 async def get_summary(server_id: str):
     """
