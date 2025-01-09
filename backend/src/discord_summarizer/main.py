@@ -119,7 +119,7 @@ async def get_summary(server_id: str):
                     }
                     cache_hits += 1
                 else:
-                    # No valid cache, need to generate a new summary
+                    # No valid cachE, need to generate a new summary
                     recent_messages = db.get_recent_messages(channel_id)
 
                     if recent_messages:
