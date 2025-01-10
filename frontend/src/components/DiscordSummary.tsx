@@ -182,7 +182,9 @@ export function DiscordSummary() {
   const handleSync = async () => {
     try {
       setSyncing(true);
-      const response = await fetch(`${API_BASE}/sync/${SERVER_ID}`);
+      const endpoint = `${API_BASE}/sync/${SERVER_ID}`;
+      console.log(endpoint);
+      const response = await fetch(endpoint);
       if (!response.ok) throw new Error("Sync failed");
       setSyncDialogOpen(false);
       await fetchSummary();

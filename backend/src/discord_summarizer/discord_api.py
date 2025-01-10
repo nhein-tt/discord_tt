@@ -4,6 +4,7 @@ from .config import DISCORD_TOKEN, DISCORD_API_BASE
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta, timezone
 from .summarizer import call_openai_api
+import asyncio
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -26,16 +27,67 @@ async def fetch_channels(server_id: str) -> List[Dict]:
             response.raise_for_status()
             return await response.json()
 
+# async def fetch_messages(channel_id: str, before: str = None, limit: int = 100) -> List[Dict]:
+#     """
+#     Asynchronously fetches messages from a Discord channel with support for pagination.
+
+#     Args:
+#         channel_id (str): The Discord channel ID to fetch messages from
+#         before (str, optional): Message ID to fetch messages before (for pagination)
+#         limit (int, optional): Number of messages to fetch per request (max 100)
+
+#     Returns:
+#         List[Dict]: List of message objects from Discord
+#     """
+#     url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+
+#     # Build query parameters
+#     params = {"limit": min(limit, 100)}  # Discord's max is 100
+#     if before:
+#         params["before"] = before
+
+#     try:
+#         async with aiohttp.ClientSession() as session:
+#             async with session.get(url, headers=HEADERS, params=params) as response:
+#                 if response.status == 403:
+#                     raise PermissionError(f"Access denied for channel ID: {channel_id}")
+#                 if response.status == 401:
+#                     raise ValueError("Invalid Discord token")
+
+#                 response.raise_for_status()
+#                 messages = await response.json()
+
+#                 # Transform the response into our expected format
+#                 return [
+#                     {
+#                         "id": msg["id"],
+#                         "author": msg["author"]["username"],
+#                         "content": msg["content"],
+#                         "timestamp": msg["timestamp"]
+#                     }
+#                     for msg in messages
+#                 ]
+#     except aiohttp.ClientError as e:
+#         logger.error(f"Discord API request failed for channel {channel_id}: {str(e)}")
+#         raise
+
 async def fetch_messages(channel_id: str) -> List[Dict]:
     """
     Asynchronously fetches messages from a Discord channel.
+    Returns messages in their original Discord API format to maintain compatibility
+    with database operations.
     """
     url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=HEADERS) as response:
             if response.status == 403:
                 raise PermissionError(f"Access denied for channel ID: {channel_id}")
+            if response.status == 401:
+                raise ValueError("Invalid Discord token")
+
             response.raise_for_status()
+            # Return the raw Discord message format instead of transforming it
             return await response.json()
 
 def filter_recent_messages(messages: List[Dict], days: int = 7) -> List[Dict]:

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from .discord_api import scrape_messages, fetch_channels, filter_recent_messages, fetch_messages, summarize_channel
 from .summarizer import summarize_discord_data
@@ -7,8 +7,19 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from .database import DiscordDB
+from .sync_manager import SyncStateManager
+from .sync_operations import perform_sync
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(root_path="/api")
+sync_manager = SyncStateManager()
 db = DiscordDB()
+
 
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
@@ -26,14 +37,16 @@ app.add_middleware(
 async def sync_single_channel(channel_id: str, channel_name: str, server_id: str):
     """
     Synchronizes a single Discord channel's messages with our database.
-    This function handles the actual sync process for one channel.
+    Returns True on success, raises an exception on failure.
     """
     try:
         # First, record the channel in our database
         db.add_channel(channel_id, server_id, channel_name)
 
         # Fetch messages from Discord
-        messages = await fetch_messages(channel_id)  # Make sure fetch_messages is async
+        messages = await fetch_messages(channel_id)
+        if not isinstance(messages, list):
+            raise ValueError(f"Expected list of messages, got {type(messages)}")
 
         # Store them in our database
         db.add_messages(channel_id, messages)
@@ -43,13 +56,73 @@ async def sync_single_channel(channel_id: str, channel_name: str, server_id: str
 
         logging.info(f"Successfully synced channel {channel_name}")
         return True
+
     except Exception as e:
         logging.error(f"Error syncing channel {channel_name}: {str(e)}")
-        return False
+        raise  # Re-raise the exception to be handled by the caller
+
+# async def sync_single_channel(channel_id: str, channel_name: str, server_id: str):
+#     """
+#     Synchronizes a single Discord channel's messages with our database.
+#     This function handles the actual sync process for one channel.
+#     """
+#     try:
+#         # First, record the channel in our database
+#         db.add_channel(channel_id, server_id, channel_name)
+
+#         # Fetch messages from Discord
+#         messages = await fetch_messages(channel_id)  # Make sure fetch_messages is async
+
+#         # Store them in our database
+#         db.add_messages(channel_id, messages)
+
+#         # Update the sync timestamp
+#         db.update_sync_status(channel_id)
+
+#         logging.info(f"Successfully synced channel {channel_name}")
+#         return True
+#     except Exception as e:
+#         logging.error(f"Error syncing channel {channel_name}: {str(e)}")
+#         return False
 
 @app.get("/")
 async def root():
     return {"message": "Hello, World!"}
+
+@app.get("/sync/{server_id}")
+async def start_sync(server_id: str, background_tasks: BackgroundTasks):
+    """
+    Start a new sync operation for a Discord server.
+    Returns immediately and runs the sync in the background.
+    """
+    current_state = sync_manager.get_sync_state(server_id)
+    if current_state and current_state["status"] == "in_progress":
+        return {
+            "status": "already_running",
+            "state": current_state
+        }
+
+    background_tasks.add_task(perform_sync, server_id, sync_manager)
+
+    return {
+        "status": "started",
+        "server_id": server_id,
+        "message": "Sync operation started"
+    }
+
+@app.get("/sync/{server_id}/status")
+async def get_sync_status(server_id: str):
+    """
+    Get the current status of a sync operation for a server.
+    """
+    state = sync_manager.get_sync_state(server_id)
+    if not state:
+        raise HTTPException(
+            status_code=404,
+            detail="No sync operation found for this server"
+        )
+
+    return state
 
 @app.post("/clear-cache/{server_id}")
 async def clear_summaries_cache(server_id: str):
@@ -254,51 +327,87 @@ async def get_summary(server_id: str):
 #         logging.error(f"Error in get_summary: {str(e)}")
 #         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/sync/{server_id}")
-async def force_sync(server_id: str):
-    """
-    Endpoint to force a full resync of all channels in a server.
-    Now properly handles async operations.
-    """
-    try:
-        channels = await fetch_channels(server_id)  # Make sure fetch_channels is async
-        synced_channels = 0
-        failed_channels = 0
 
-        # Create a list of sync tasks
-        sync_tasks = []
-        for channel in channels:
-            if not channel.get("name") or not channel.get("channel_id"):
-                continue
 
-            sync_tasks.append(
-                sync_single_channel(
-                    channel["channel_id"],
-                    channel["name"],
-                    server_id
-                )
-            )
+# @app.get("/sync/{server_id}")
+# async def force_sync(server_id: str):
+#     """
+#     Endpoint to force a full resync of all channels in a server.
+#     Now with improved error handling and response validation.
+#     """
+#     try:
+#         # Fetch channels and validate the response
+#         channels = await fetch_channels(server_id)
+#         if not isinstance(channels, list):
+#             raise ValueError(f"Expected list of channels, got {type(channels)}")
 
-        # Run all sync tasks concurrently and collect results
-        results = await asyncio.gather(*sync_tasks, return_exceptions=True)
+#         synced_channels = 0
+#         failed_channels = 0
+#         failed_channel_details = []  # Track which channels failed and why
 
-        # Count successes and failures
-        for result in results:
-            if isinstance(result, Exception):
-                failed_channels += 1
-            elif result:  # Successfully synced
-                synced_channels += 1
-            else:  # Sync returned False
-                failed_channels += 1
+#         # Create a list of sync tasks
+#         sync_tasks = []
+#         for channel in channels:
+#             # Validate channel data before processing
+#             if not isinstance(channel, dict):
+#                 logging.error(f"Invalid channel data: {channel}")
+#                 continue
 
-        return {
-            "status": "completed",
-            "synced_channels": synced_channels,
-            "failed_channels": failed_channels,
-            "total_channels": len(channels)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#             channel_id = channel.get("id")  # Discord API uses "id", not "channel_id"
+#             channel_name = channel.get("name")
+
+#             if not channel_id or not channel_name:
+#                 logging.error(f"Missing required channel data: {channel}")
+#                 continue
+
+#             sync_tasks.append(
+#                 sync_single_channel(
+#                     channel_id,
+#                     channel_name,
+#                     server_id
+#                 )
+#             )
+
+#         # Run all sync tasks concurrently and collect results
+#         results = await asyncio.gather(*sync_tasks, return_exceptions=True)
+
+#         # Process results with detailed error tracking
+#         for idx, result in enumerate(results):
+#             if isinstance(result, Exception):
+#                 failed_channels += 1
+#                 channel_info = channels[idx]
+#                 failed_channel_details.append({
+#                     "name": channel_info.get("name", "Unknown"),
+#                     "error": str(result)
+#                 })
+#             elif result is True:  # Successfully synced
+#                 synced_channels += 1
+#             else:  # Sync returned False or unexpected value
+#                 failed_channels += 1
+
+#         # Construct a valid response that can be JSON serialized
+#         response = {
+#             "status": "completed",
+#             "synced_channels": synced_channels,
+#             "failed_channels": failed_channels,
+#             "total_channels": len(channels),
+#             "failures": failed_channel_details if failed_channel_details else None
+#         }
+
+#         # Validate that all dictionary keys are strings
+#         for key in response.keys():
+#             if not isinstance(key, str):
+#                 logging.error(f"Invalid response key type: {key} ({type(key)})")
+#                 raise ValueError(f"Invalid response key type: {key}")
+
+#         return response
+
+#     except Exception as e:
+#         logging.error(f"Sync operation failed: {str(e)}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Sync operation failed: {str(e)}"
+#         )
 
 # @app.get("/summarize/{server_id}")
 # async def get_summary(server_id: str):

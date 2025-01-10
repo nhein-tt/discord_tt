@@ -14,6 +14,8 @@ services:
       - DATABASE_URL=sqlite:///discord_messages.db
       - UV_COMPILE_BYTECODE=1
       - UV_LINK_MODE=copy
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     command: uvicorn src.discord_summarizer.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
